@@ -1,9 +1,13 @@
+import time
+import requests
 from googlesearch import search
 from urllib.parse import urlparse
 
-MAX_RESULTS = 25
+MAX_RESULTS = 15
 
-SLEEP_INTERVAL = 9
+SLEEP_INTERVAL = 3
+
+TIMEOUT = 3
 
 TARGET_DOMAIN = "missioncontrol.com.mx"
 
@@ -66,13 +70,28 @@ def isTargetDomain(url):
 
 
 def main():
-    for query in queries:
-        results = search(query, num_results=MAX_RESULTS,
-                         sleep_interval=5, lang="es")
-        print(query + ": ")
-        for idx, result in enumerate(results):
-            if (isTargetDomain(result)):
-                print("\tPosición: " + str(idx + 1))
+    while True:  # Bucle infinito
+        for query in queries:
+            try:
+                results = search(
+                    query, sleep_interval=SLEEP_INTERVAL, lang="es", timeout=TIMEOUT)
+                print(query + ": ")
+                for idx, result in enumerate(results):
+                    if isTargetDomain(result):
+                        print("\tPosición: " + str(idx + 1) + "\t" + result)
+            except requests.exceptions.ReadTimeout as e:
+                print("Timeout")
+            except requests.exceptions.HTTPError as e:
+                print("Se alcanzó el límite de solicitudes. Reintentando en 20mns...")
+                time.sleep(1200)  # Espera una hora (3600 segundos)
+            except requests.exceptions.ConnectionError:
+                print("Google rechazó la conexión. Reintando en unos segundos...")
+                time.sleep(36)  # Espera refresh rápido (36 segundos)
+            except Exception as ex:
+                print("Error desconocido:", ex)
+            time.sleep(5) #Buffer de tiempo entre llamadas
+
+        break  # Salir del while, se logró la búsqueda
 
 
 if __name__ == "__main__":
