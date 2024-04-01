@@ -1,17 +1,18 @@
-import time
-import requests
-from googlesearch import search
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.common.exceptions import NoSuchElementException
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.wait import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import csv
 from urllib.parse import urlparse
 
-MAX_RESULTS = 15
-
-SLEEP_INTERVAL = 3
-
-TIMEOUT = 3
 
 TARGET_DOMAIN = "missioncontrol.com.mx"
 
-queries = [
+
+keywords = [
     "mission control",
     "yamaha yc61 precio",
     "mcintosh rs150",
@@ -69,30 +70,73 @@ def isTargetDomain(url):
     return parsed_url.netloc == TARGET_DOMAIN
 
 
-def main():
-    while True:  # Bucle infinito
-        for query in queries:
-            try:
-                results = search(
-                    query, sleep_interval=SLEEP_INTERVAL, lang="es", timeout=TIMEOUT)
-                print(query + ": ")
-                for idx, result in enumerate(results):
-                    if isTargetDomain(result):
-                        print("\tPosición: " + str(idx + 1) + "\t" + result)
-            except requests.exceptions.ReadTimeout as e:
-                print("Timeout")
-            except requests.exceptions.HTTPError as e:
-                print("Se alcanzó el límite de solicitudes. Reintentando en 20mns...")
-                time.sleep(1200)  # Espera una hora (3600 segundos)
-            except requests.exceptions.ConnectionError:
-                print("Google rechazó la conexión. Reintando en unos segundos...")
-                time.sleep(36)  # Espera refresh rápido (36 segundos)
-            except Exception as ex:
-                print("Error desconocido:", ex)
-            time.sleep(5) #Buffer de tiempo entre llamadas
+def scrape_serp_data(kw):
+    options = Options()
+    options.add_argument('--headless=new') # comentar para probar en modo visible (abre el navegador)
 
-        break  # Salir del while, se logró la búsqueda
+    driver = webdriver.Chrome(service=Service(), options=options)
+    driver.get("https://google.com/")
+
+    try:
+        cookie_dialog = driver.find_element(By.CSS_SELECTOR, "[role='dialog']")
+        accept_button = cookie_dialog.find_element(
+            By.XPATH, ".//button[contains(., 'Accept')]")
+        if accept_button is not None:
+            accept_button.click()
+    except NoSuchElementException:
+        pass
+
+    search_form = driver.find_element(
+        By.CSS_SELECTOR, "form[action='/search']")
+    search_textarea = search_form.find_element(By.CSS_SELECTOR, "textarea")
+    search_textarea.send_keys(kw)
+    print("Buscando: " + kw)
+    search_form.submit()
+
+    search_div = WebDriverWait(driver, 5).until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, '#search')))
+
+    serp_divs = search_div.find_elements(
+        By.CSS_SELECTOR, "div[jscontroller][jsaction][data-hveid][data-ved]")
+
+    serp_elements = []
+    rank = 1
+
+    for serp_div in serp_divs:
+        try:
+            serp_title_h3 = serp_div.find_element(By.CSS_SELECTOR, "h3")
+            title = serp_title_h3.text
+            serp_title_a = serp_title_h3.find_element(By.XPATH, './..')
+            url = serp_title_a.get_attribute("href")
+        except NoSuchElementException:
+            continue
+        if isTargetDomain(url):
+            serp_element = {
+                'rank': rank,
+                'url': url,
+                'title': title,
+                'keyword': kw
+            }
+            serp_elements.append(serp_element)
+
+        rank += 1
+
+    driver.quit()
+    return serp_elements
 
 
-if __name__ == "__main__":
-    main()
+# Scraping de datos SERP para cada palabra clave
+all_serp_data = []
+for kw in keywords:
+    serp_data = scrape_serp_data(kw)
+    all_serp_data.extend(serp_data)
+
+# Exportar los datos a un archivo CSV
+csv_file = "serp_results.csv"
+header = ['keyword', 'rank', 'url', 'title']
+with open(csv_file, 'w', newline='', encoding='utf-8') as csvfile:
+    writer = csv.DictWriter(csvfile, fieldnames=header)
+    writer.writeheader()
+    writer.writerows(all_serp_data)
+
+print("Scraping completado. Datos guardados en", csv_file)
